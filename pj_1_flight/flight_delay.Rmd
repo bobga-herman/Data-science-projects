@@ -1,0 +1,298 @@
+---
+title: "Predicting Flight Delays Using Machine Learning"
+author: "Bobga-Herman Gwanvoma"
+date: "2025-03-31"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Install necessary packages if not already installed
+required_packages <- c("dplyr", "tidyverse", "lubridate", "ggplot2", "pROC", 
+                       "randomForest", "xgboost", "caret")
+
+# Check if each package is installed, if not install it
+for (pkg in required_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+  }
+}
+
+# Load all required libraries
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(pROC)
+library(randomForest)
+library(xgboost)
+library(caret)
+```
+
+```{r}
+# Step 2: Extract the ZIP Files
+zip_file_1 <- "C:/Users/bobi/Documents/DSC 680/ot_delaycause1_DL (1).zip"
+zip_file_2 <- "C:/Users/bobi/Documents/DSC 680/flights_sample_3m.csv (2).zip"
+
+# Extract the first zip file
+unzip(zip_file_1, exdir = "C:/Users/bobi/Documents/DSC 680/ot_delaycause1_DL_1")
+
+# Extract the second zip file
+unzip(zip_file_2, exdir = "C:/Users/bobi/Documents/DSC 680/flights_sample_3m_2")
+```
+Load the Data
+```{r}
+# Step 3: Load the Data
+delay_cause_data <- read.csv("C:/Users/bobi/Documents/DSC 680/ot_delaycause1_DL_1/Airline_Delay_Cause.csv")
+flights_sample_data <- read.csv("C:/Users/bobi/Documents/DSC 680/flights_sample_3m_2/flights_sample_3m.csv")
+```
+Data cleanning
+```{r}
+# Step 4: Create a Date Column for delay_cause_data
+delay_cause_data$Date <- as.Date(paste(delay_cause_data$year, delay_cause_data$month, "01", sep = "-"), format = "%Y-%m-%d")
+```
+
+```{r}
+# Step 5: Remove Duplicates
+# Remove duplicates based on 'FL_NUMBER' and 'AIRLINE_CODE' for flights_sample_data
+flights_sample_data_unique <- flights_sample_data %>%
+  distinct(FL_NUMBER, AIRLINE_CODE, .keep_all = TRUE)
+
+# Remove duplicates based on 'carrier' for delay_cause_data
+delay_cause_data_unique <- delay_cause_data %>%
+  distinct(carrier, .keep_all = TRUE)
+```
+
+```{r}
+# Step 6: Check and Convert Data Types
+# Ensure both 'AIRLINE_CODE' and 'carrier' are character type
+flights_sample_data_unique$AIRLINE_CODE <- as.character(flights_sample_data_unique$AIRLINE_CODE)
+delay_cause_data_unique$carrier <- as.character(delay_cause_data_unique$carrier)
+```
+Merge the Datasets
+```{r}
+# Step 7: Merge the Datasets
+# Merge datasets using 'AIRLINE_CODE' and 'carrier'
+combined_data <- merge(flights_sample_data_unique, delay_cause_data_unique, by.x = "AIRLINE_CODE", by.y = "carrier", all = TRUE)
+```
+Inspect the Combined Data
+```{r}
+# Step 8: Inspect the Combined Data
+head(combined_data)
+```
+Save the Combined Data to a New CSV
+
+
+```{r}
+# Load the cleaned dataset
+combined_dt <- read.csv("C:/Users/bobi/Documents/DSC 680/combined_flight_data.csv")
+
+# Check the first few rows of the dataset
+head(combined_dt)
+
+```
+Data Preprocessing
+```{r}
+# Convert columns to proper types (if needed)
+combined_dt$Date <- as.Date(combined_dt$Date)
+combined_dt$AIRLINE_CODE <- as.factor(combined_dt$AIRLINE_CODE)
+combined_dt$FL_NUMBER <- as.factor(combined_dt$FL_NUMBER)
+
+# Handle missing values: we can impute with the mean for simplicity (or remove rows with NAs)
+combined_dt <- combined_dt %>% 
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+# Normalize the numerical columns for modeling
+combined_dt_scaled <- combined_dt %>%
+  mutate(across(c(arr_delay, carrier_delay, weather_delay, nas_delay, security_delay, late_aircraft_delay), 
+                scale, .names = "scaled_{.col}"))
+
+# Inspect the scaled data
+head(combined_dt_scaled)
+
+```
+Exploratory Data Analysis (EDA)
+```{r}
+# Visualize the distribution of delays by cause
+ggplot(combined_dt, aes(x = carrier_delay)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "black") +
+  ggtitle("Distribution of Carrier Delays") +
+  xlab("Carrier Delay (minutes)") + ylab("Frequency")
+
+# Visualize the distribution of weather delays
+ggplot(combined_dt, aes(x = weather_delay)) +
+  geom_histogram(bins = 50, fill = "orange", color = "black") +
+  ggtitle("Distribution of Weather Delays") +
+  xlab("Weather Delay (minutes)") + ylab("Frequency")
+
+# Scatter plot of delay causes vs arrival delay
+ggplot(combined_dt, aes(x = weather_delay, y = arr_delay)) +
+  geom_point() +
+  ggtitle("Weather Delay vs Arrival Delay") +
+  xlab("Weather Delay (minutes)") + ylab("Arrival Delay (minutes)")
+
+```
+Feature Engineering
+```{r}
+# Create a new feature for delay severity (could be a combination of delays or an indicator)
+combined_dt$high_severity_delay <- ifelse(combined_dt$arr_delay > 30, 1, 0)
+
+# Check the new feature
+head(combined_dt)
+
+
+```
+Split the Data into Training and Testing Sets
+```{r}
+# Remove rows with missing values in the target variable 'high_severity_delay'
+combined_data_clean <- combined_dt %>%
+  filter(!is.na(high_severity_delay))
+
+# Check if any missing values remain
+sum(is.na(combined_data_clean))
+
+
+```
+```{r}
+# Split data into training (80%) and testing (20%) sets
+set.seed(123)  # Set seed for reproducibility
+train_index <- createDataPartition(combined_data_clean$high_severity_delay, p = 0.8, list = FALSE)
+
+train_data <- combined_data_clean[train_index, ]
+test_data <- combined_data_clean[-train_index, ]
+
+# Check the dimensions of the split data
+dim(train_data)
+dim(test_data)
+
+```
+Train the Models
+
+1) Random Forest Model
+
+```{r}
+# Step 1: Ensure high_severity_delay is a factor in both train_data and test_data
+train_data$high_severity_delay <- factor(train_data$high_severity_delay)
+test_data$high_severity_delay <- factor(test_data$high_severity_delay)
+
+# Step 2: Balance the data by undersampling
+train_data_balanced <- train_data %>%
+  group_by(high_severity_delay) %>%
+  sample_n(min(table(train_data$high_severity_delay)))
+
+# Check the new distribution
+table(train_data_balanced$high_severity_delay)
+
+# Step 3: Train the Random Forest model on the balanced dataset
+rf_model_balanced <- randomForest(high_severity_delay ~ carrier_delay + weather_delay + nas_delay + arr_delay,
+                                  data = train_data_balanced, importance = TRUE, ntree = 100)
+
+# Print the results of the re-trained model
+print(rf_model_balanced)
+
+# Step 4: Predict on the test set
+rf_pred_balanced <- predict(rf_model_balanced, test_data)
+
+# Check the first few predictions
+head(rf_pred_balanced)
+
+# Step 5: Ensure both rf_pred_balanced and test_data$high_severity_delay have the same factor levels
+rf_pred_balanced <- factor(rf_pred_balanced, levels = levels(test_data$high_severity_delay))
+
+# Step 6: Calculate the confusion matrix
+rf_cm_balanced <- confusionMatrix(rf_pred_balanced, test_data$high_severity_delay)
+
+# Print the confusion matrix results
+print(rf_cm_balanced)
+
+```
+
+2) Train the XGBoost Model
+```{r}
+# Step 2: Prepare data for XGBoost
+# Convert predictor variables to a matrix (exclude the first column which is the intercept)
+train_matrix <- model.matrix(high_severity_delay ~ carrier_delay + weather_delay + nas_delay + arr_delay, 
+                             data = train_data)[,-1]
+test_matrix <- model.matrix(high_severity_delay ~ carrier_delay + weather_delay + nas_delay + arr_delay, 
+                            data = test_data)[,-1]
+
+# Step 3: Ensure the target variable is numeric (0 and 1)
+train_label <- as.numeric(train_data$high_severity_delay) - 1
+test_label <- as.numeric(test_data$high_severity_delay) - 1
+
+# Step 4: Train the XGBoost model
+xgb_model <- xgboost(data = train_matrix, label = train_label, nrounds = 100, objective = "binary:logistic", 
+                     eval_metric = "logloss", verbose = 0)
+
+# Step 5: Predict on the test set
+xgb_pred <- predict(xgb_model, test_matrix)
+
+# Convert predictions to binary labels (0 or 1)
+xgb_pred_class <- ifelse(xgb_pred > 0.5, 1, 0)
+
+# Step 6: Evaluate the model performance using confusion matrix
+library(caret)
+xgb_cm_balanced <- confusionMatrix(factor(xgb_pred_class), factor(test_label))
+
+# Print confusion matrix results
+print(xgb_cm_balanced)
+
+
+
+```
+
+Model Evaluation
+```{r}
+# Random Forest model performance
+rf_cm <- confusionMatrix(rf_pred_balanced, test_data$high_severity_delay)
+print(rf_cm)
+```
+
+```{r}
+# XGBoost model performance
+xgb_cm <- confusionMatrix(factor(xgb_pred_class), factor(test_label))
+print(xgb_cm)
+
+```
+
+Visualizing Model Performance
+
+1. XGBoost Model ROC Curve
+```{r}
+# For XGBoost, the predictions are probabilities, not classes
+xgb_pred_prob <- predict(xgb_model, test_matrix)  # predicted probabilities for XGBoost
+roc_xgb <- roc(test_label, xgb_pred_prob)  # calculate ROC for XGBoost
+
+# Plot ROC curve for XGBoost
+plot(roc_xgb, main = "ROC Curve for XGBoost Model", col = "blue", lwd = 2)
+```
+2. Random Forest Model ROC Curve
+```{r}
+# For Random Forest, type = "prob" to get predicted probabilities
+rf_pred_prob <- predict(rf_model_balanced, test_data, type = "prob")[, 2]  # probabilities for class 1 (positive class)
+
+# Calculate ROC for Random Forest
+roc_rf <- roc(test_label, rf_pred_prob) 
+plot(roc_rf, main = "ROC Curve for Random Forest Model", col = "red", lwd = 2)
+```
+
+
+
+
+```{r}
+# Calculate and print AUC for both models
+auc_xgb <- auc(roc_xgb)
+auc_rf <- auc(roc_rf)
+
+print(paste("XGBoost AUC:", auc_xgb))
+print(paste("Random Forest AUC:", auc_rf))
+```
+
+
+
+
+
+
+
