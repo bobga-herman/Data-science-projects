@@ -1,0 +1,73 @@
+---
+title: "VotePulse Project"
+author: "Bobga-Herman Gwanvoma"
+date: "2025-05-31"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(tidyverse)
+library(readxl)
+library(randomForest)
+library(xgboost)
+library(caret)
+
+# Load data
+election_data <- read_csv("C:/Users/bobi/Documents/DSC_680/pj_3_vote_pulse/elections-2025-05-31T12_51_58.csv")
+demographic_data <- read_csv("C:/Users/bobi/Documents/DSC_680/pj_3_vote_pulse/GOVSTIMESERIES.CG00ORG05-2025-05-31T170206.csv")
+social_media_data <- read_excel("C:/Users/bobi/Documents/DSC_680/pj_3_vote_pulse/United States September 2024 Dataset for website codebook.xlsx", sheet = "Codebook")
+
+# View column names
+names(election_data)[1:8]
+names(demographic_data)[1:8]
+names(social_media_data)
+
+```
+
+```{r}
+# Clean & Prepare Data
+election_df <- election_data %>%
+  select(total_receipts, total_disbursements, cash_on_hand_end_period, party_full) %>%
+  mutate(across(c(total_receipts, total_disbursements, cash_on_hand_end_period), as.numeric)) %>%
+  drop_na()
+
+median_receipts <- median(election_df$total_receipts, na.rm = TRUE)
+election_df <- election_df %>%
+  mutate(high_funding = ifelse(total_receipts > median_receipts, 1, 0),
+         party_full = as.factor(party_full),
+         high_funding = as.factor(high_funding))
+```
+
+```{r}
+# Logistic Regression
+log_model <- glm(high_funding ~ total_disbursements + cash_on_hand_end_period + party_full,
+                 data = election_df, family = binomial)
+summary(log_model)
+
+```
+
+```{r}
+# Random Forest
+rf_model <- randomForest(high_funding ~ total_disbursements + cash_on_hand_end_period + party_full,
+                         data = election_df, ntree = 100, importance = TRUE)
+print(rf_model)
+varImpPlot(rf_model)
+```
+
+```{r}
+# XGBoost
+xgb_df <- election_df %>% select(total_disbursements, cash_on_hand_end_period) %>% as.matrix()
+xgb_target <- as.numeric(election_df$high_funding) - 1
+dtrain <- xgb.DMatrix(data = xgb_df, label = xgb_target)
+
+xgb_model <- xgboost(data = dtrain, max.depth = 3, eta = 0.1,
+                     nrounds = 50, objective = "binary:logistic", verbose = 0)
+
+importance <- xgb.importance(model = xgb_model)
+xgb.plot.importance(importance_matrix = importance)
+```
+```{r}
+```
