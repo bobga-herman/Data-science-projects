@@ -1,0 +1,151 @@
+---
+title: "640w9&10_ex_Gwanvoma"
+author: "Bobga-Herman Gwanvoma"
+date: "2025-02-17"
+output: pdf_document
+---
+
+```{r}
+### Load Required Libraries
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(ggcorrplot)
+library(leaflet)
+library(reshape2)
+library(viridis)
+library(sf)
+
+### Load Data
+complaints_by_subcategory <- read.csv("C:/Users/bobi/Documents/DSC 640/w9&10/complaints-by-subcategory.csv")
+complaints_by_category <- read.csv("C:/Users/bobi/Documents/DSC 640/w9&10/complaints-by-category.csv")
+iata_icao <- read.csv("C:/Users/bobi/Documents/DSC 640/w9&10/iata-icao.csv")
+complaints_by_airport <- read.csv("C:/Users/bobi/Documents/DSC 640/w9&10/complaints-by-airport.csv")
+
+
+
+### Data Preparation
+# Merge complaints data with airport geolocation
+airport_complaints <- complaints_by_airport %>%
+  left_join(iata_icao, by = "airport") %>%
+  filter(!is.na(latitude) & !is.na(longitude))
+
+
+# Convert date fields to Date format
+complaints_by_category$year_month <- as.Date(paste0(complaints_by_category$year_month, "-01"))
+complaints_by_subcategory$year_month <- as.Date(paste0(complaints_by_subcategory$year_month, "-01"))
+complaints_by_airport$year_month <- as.Date(paste0(complaints_by_airport$year_month, "-01"))
+
+```
+
+```{r}
+### 1 Heat Map: Complaints by Category Over Time
+heatmap_data <- complaints_by_category %>%
+  group_by(year_month, category) %>%
+  summarise(total_complaints = sum(count), .groups = "drop")
+
+
+heatmap_plot <- ggplot(heatmap_data, aes(x = year_month, y = category, fill = total_complaints)) +
+  geom_tile() +
+  scale_fill_viridis(option = "C", direction = -1) +
+  theme_minimal() +
+  labs(title = "Heat Map of Complaints by Category Over Time",
+       x = "Year-Month", y = "Category", fill = "Complaint Count")
+```
+
+```{r}
+### 2 Box Plot: Distribution of Complaints per Category
+boxplot_plot <- ggplot(complaints_by_category, aes(x = category, y = count)) +
+  geom_boxplot(fill = "skyblue") +
+  theme_minimal() +
+  coord_flip() +
+  labs(title = "Distribution of Complaints per Category",
+       x = "Category", y = "Complaint Count")
+```
+
+
+```{r}
+### 3 Custom Visual: Complaints by Airport (Top 10)
+top_airports <- complaints_by_airport %>% 
+  group_by(airport) %>% 
+  summarize(total_complaints = sum(count)) %>% 
+  arrange(desc(total_complaints)) %>% 
+  head(10)
+
+top_airports_plot <- ggplot(top_airports, aes(x = reorder(airport, -total_complaints), y = total_complaints)) +
+  geom_col(fill = "coral") +
+  theme_minimal() +
+  coord_flip() +
+  labs(title = "Top 10 Airports with Most Complaints",
+       x = "Airport", y = "Total Complaints")
+```
+
+```{r}
+### 4 Spatial Visualization: Complaints Mapped to Airport Locations
+airport_map <- leaflet(data = airport_complaints) %>% 
+  addTiles() %>% 
+  addCircleMarkers(~longitude, ~latitude, radius = ~sqrt(count)/3,
+                   color = "red", stroke = FALSE, fillOpacity = 0.6,
+                   popup = ~paste(airport, "Complaints:", count))
+```
+
+```{r}
+### 5 Time Series: Trends in Complaints Over Time
+trend_plot <- ggplot(complaints_by_category, aes(x = year_month, y = count, color = category)) +
+  geom_line() +
+  theme_minimal() +
+  labs(title = "Trends in Complaints Over Time",
+       x = "Year-Month", y = "Complaint Count")
+```
+
+```{r}
+### 6️⃣ Correlation Heatmap (Custom Visual)
+# Select only numeric columns
+num_cols <- complaints_by_category %>% select_if(is.numeric)
+
+# Print numeric column names for debugging
+print("Numeric Columns in Dataset:")
+print(colnames(num_cols))
+
+# Ensure at least two numeric columns
+if (ncol(num_cols) > 1) {
+  corr_data <- cor(num_cols, use = "pairwise.complete.obs")
+  
+  if (!is.null(corr_data) && nrow(corr_data) > 1) {
+    print("Correlation matrix successfully created. Generating heatmap...")
+    
+    corr_heatmap <- ggcorrplot(corr_data, hc.order = TRUE, type = "lower",
+                               lab = TRUE, lab_size = 3, method = "circle",
+                               colors = c("#6D9EC1", "white", "#E46726"),
+                               title = "Correlation Heatmap of Complaint Data",
+                               theme_minimal())
+  } else {
+    print("Correlation matrix is too small. Heatmap cannot be generated.")
+    corr_heatmap <- NULL  # Ensure variable exists
+  }
+} else {
+  print("Still not enough numeric columns to compute correlation.")
+  corr_heatmap <- NULL  # Prevents 'object not found' error
+}
+
+
+
+```
+
+```{r}
+
+### Display Plots
+print(heatmap_plot)
+print(boxplot_plot)
+print(top_airports_plot)
+print(trend_plot)
+
+### Print correlation heatmap only if it exists
+if (!is.null(corr_heatmap)) {
+  print(corr_heatmap)
+}
+
+### Render Spatial Map
+airport_map
+
+```

@@ -1,0 +1,163 @@
+---
+title: "kia theft assignment"
+author: "Bobga-Herman Gwanvoma"
+date: "2025-01-20"
+output: pdf_document
+---
+Load the Data
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(treemap)
+library(scales)
+library(ggforce)
+
+
+# Load datasets
+vice_news_data <- read_excel("C:/Users/bobi/Documents/DSC 640/w5&6/Motherboard VICE News Kia Hyundai Theft Data.xlsx")
+kia_hyundai_thefts <- read.csv("C:/Users/bobi/Documents/DSC 640/w5&6/kiaHyundaiThefts.csv")
+car_thefts_map <- read.csv("C:/Users/bobi/Documents/DSC 640/w5&6/carTheftsMap.csv")
+milwaukee_data <- read.csv("C:/Users/bobi/Documents/DSC 640/w5&6/KiaHyundaiMilwaukeeData.csv")
+
+# View structure of datasets
+str(vice_news_data)
+str(kia_hyundai_thefts)
+str(car_thefts_map)
+str(milwaukee_data)
+
+```
+Clean and Preprocess the Data
+```{r}
+# Clean VICE News Data
+vice_clean <- vice_news_data %>%
+  select(-starts_with("Unnamed")) %>%  # Remove irrelevant columns
+  drop_na()  # Remove rows with missing values
+
+# Clean Kia Hyundai Thefts
+kia_hyundai_clean <- kia_hyundai_thefts %>%
+  mutate(month_year = paste(month, year, sep = "-")) %>%
+  select(city, state, countKiaHyundaiThefts, countOtherThefts, percentKiaHyundai, month_year)
+
+# Clean Car Thefts Map
+car_thefts_clean <- car_thefts_map %>%
+  rename(geo_location = geo_name) %>%
+  mutate(percent_change = as.numeric(percentChange2019to2022)) %>%
+  drop_na()
+
+# Clean Milwaukee Data
+milwaukee_clean <- milwaukee_data %>%
+  mutate(month_year = paste(month, year, sep = "-")) %>%
+  select(city, state, countKiaHyundaiThefts, countOtherThefts, percentKiaHyundai, month_year)
+
+```
+Visualizations
+Visualization 1: Pie Chart (Proportion of Kia vs. Hyundai Thefts)
+
+```{r}
+# Aggregate Kia/Hyundai thefts
+kia_vs_hyundai <- kia_hyundai_clean %>%
+  summarise(total_kia_hyundai = sum(countKiaHyundaiThefts),
+            total_other = sum(countOtherThefts))
+
+# Create pie chart
+pie_data <- c(kia_vs_hyundai$total_kia_hyundai, kia_vs_hyundai$total_other)
+labels <- c("Kia/Hyundai", "Other Vehicles")
+
+pie(pie_data, labels = labels, col = c("skyblue", "orange"), main = "Proportion of Kia/Hyundai vs. Other Vehicle Thefts")
+
+```
+Visualization 2: Donut Chart (Thefts by Time Period)
+```{r}
+library(ggplot2)
+
+# Summarize data for donut chart
+time_summary <- milwaukee_clean %>%
+  group_by(month_year) %>%
+  summarise(total_thefts = sum(countKiaHyundaiThefts))
+
+# Donut chart
+ggplot(time_summary, aes(x = 2, y = total_thefts, fill = month_year)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  xlim(1, 2.5) +
+  theme_void() +
+  ggtitle("Thefts Over Time (Donut Chart)")
+
+```
+Visualization 3: Stacked Bar Chart (Thefts by Neighborhood)
+```{r}
+# Stacked bar chart
+kia_hyundai_clean %>%
+  group_by(city, state) %>%
+  summarise(Kia_Hyundai_Thefts = sum(countKiaHyundaiThefts),
+            Other_Thefts = sum(countOtherThefts)) %>%
+  gather(key = "Type", value = "Count", -city, -state) %>%
+  ggplot(aes(x = city, y = Count, fill = Type)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Thefts by Neighborhood", x = "City", y = "Number of Thefts")
+
+```
+Visualization 4:Tree Map: Theft Distribution by Vehicle Type
+```{r}
+# Load necessary library
+library(treemap)
+
+# Data summarization
+vehicle_summary <- milwaukee_clean %>%
+  group_by(city) %>%
+  summarise(Total_Thefts = sum(countKiaHyundaiThefts))
+
+# Create treemap
+treemap(vehicle_summary,
+        index = "city",
+        vSize = "Total_Thefts",
+        title = "Theft Distribution by Vehicle Type",
+        palette = "Blues")
+
+```
+Visualization 5: Area Chart (Theft Trends Over Time)
+```{r}
+# Area chart
+ggplot(milwaukee_clean, aes(x = month_year, y = countKiaHyundaiThefts, group = 1)) +
+  geom_area(fill = "skyblue", alpha = 0.5) +
+  geom_line(color = "blue") +
+  theme_minimal() +
+  labs(title = "Theft Trends Over Time", x = "Time", y = "Kia/Hyundai Thefts")
+
+```
+Visualization 6: Proportion of Thefts by Type and City
+```{r}
+# Multi-layer pie chart
+multi_layer_data <- milwaukee_clean %>%
+  group_by(city) %>%
+  summarise(Kia_Hyundai_Thefts = sum(countKiaHyundaiThefts),
+            Other_Thefts = sum(countOtherThefts)) %>%
+  pivot_longer(cols = c(Kia_Hyundai_Thefts, Other_Thefts), names_to = "Type", values_to = "Count")
+
+ggplot(multi_layer_data, aes(x0 = 0, y0 = 0, r0 = ifelse(Type == "Kia_Hyundai_Thefts", 0.6, 1), r = ifelse(Type == "Kia_Hyundai_Thefts", 1, 1.4), amount = Count, fill = city)) +
+  geom_arc_bar(stat = "pie") +
+  scale_fill_brewer(palette = "Set3") +
+  coord_fixed() +
+  labs(title = "Proportion of Thefts by Type and City", fill = "City") +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+
+
+```{r}
+ggsave("C:/Users/bobi/Documents/DSC 640/w5&6/pie_chart.png")
+ggsave("C:/Users/bobi/Documents/DSC 640/w5&6/donut_chart.png")
+ggsave("C:/Users/bobi/Documents/DSC 640/w5&6/stacked_bar_chart.png")
+ggsave("C:/Users/bobi/Documents/DSC 640/w5&6/tree_map.png")
+ggsave("C:/Users/bobi/Documents/DSC 640/w5&6/area_chart.png")
+ggsave("C:/Users/bobi/Documents/DSC 640/w5&6/stacked_area_chart.png")
+
+```
+
